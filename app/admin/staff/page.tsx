@@ -3,16 +3,15 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Staff, Qualification } from "@/lib/types";
+import { EMPLOYMENT_TYPES, POSITIONS } from "@/lib/constants";
 
 type StaffWithQuals = Staff & { qualificationIds: string[] };
 
 const emptyForm = {
   id: "",
-  email: "",
   full_name: "",
-  role: "staff" as "staff" | "admin",
-  employment_type: "",
-  desired_work_days_per_week: "",
+  employment_type: EMPLOYMENT_TYPES[0] as string,
+  position: "",
   qualificationIds: [] as string[],
 };
 
@@ -54,11 +53,9 @@ export default function StaffPage() {
   function startEdit(s: StaffWithQuals) {
     setForm({
       id: s.id,
-      email: s.email,
       full_name: s.full_name,
-      role: s.role,
-      employment_type: s.employment_type ?? "",
-      desired_work_days_per_week: s.desired_work_days_per_week?.toString() ?? "",
+      employment_type: s.employment_type ?? EMPLOYMENT_TYPES[0],
+      position: s.position ?? "",
       qualificationIds: s.qualificationIds,
     });
     setEditing(true);
@@ -77,13 +74,9 @@ export default function StaffPage() {
 
     try {
       const payload = {
-        email: form.email.trim(),
         full_name: form.full_name.trim(),
-        role: form.role,
-        employment_type: form.employment_type || null,
-        desired_work_days_per_week: form.desired_work_days_per_week
-          ? Number(form.desired_work_days_per_week)
-          : null,
+        employment_type: form.employment_type,
+        position: form.position || null,
       };
 
       let staffId = form.id;
@@ -137,7 +130,7 @@ export default function StaffPage() {
       <div>
         <h1 className="text-lg font-bold text-slate-800">職員管理</h1>
         <p className="text-sm text-slate-500 mt-1">
-          職員を登録すると、そのメールアドレスでサインアップした人が自動的に紐付きます。
+          メールアドレスの登録は不要です。この画面から職員情報を直接登録してください。
         </p>
       </div>
 
@@ -149,7 +142,7 @@ export default function StaffPage() {
           {editing ? "職員を編集" : "職員を追加"}
         </h2>
 
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm text-slate-600 mb-1">氏名</label>
             <input
@@ -157,52 +150,37 @@ export default function StaffPage() {
               value={form.full_name}
               onChange={(e) => setForm({ ...form, full_name: e.target.value })}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              placeholder="例）山田 花子"
             />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-600 mb-1">メールアドレス</label>
-            <input
-              required
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-600 mb-1">権限</label>
-            <select
-              value={form.role}
-              onChange={(e) =>
-                setForm({ ...form, role: e.target.value as "staff" | "admin" })
-              }
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value="staff">職員</option>
-              <option value="admin">管理者</option>
-            </select>
           </div>
           <div>
             <label className="block text-sm text-slate-600 mb-1">雇用形態</label>
-            <input
+            <select
               value={form.employment_type}
               onChange={(e) => setForm({ ...form, employment_type: e.target.value })}
-              placeholder="例: 常勤 / パート"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
+            >
+              {EMPLOYMENT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
-            <label className="block text-sm text-slate-600 mb-1">週の希望勤務日数</label>
-            <input
-              type="number"
-              min={0}
-              max={7}
-              value={form.desired_work_days_per_week}
-              onChange={(e) =>
-                setForm({ ...form, desired_work_days_per_week: e.target.value })
-              }
+            <label className="block text-sm text-slate-600 mb-1">役職名</label>
+            <select
+              value={form.position}
+              onChange={(e) => setForm({ ...form, position: e.target.value })}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
+            >
+              <option value="">なし</option>
+              {POSITIONS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -260,8 +238,8 @@ export default function StaffPage() {
           <thead className="bg-slate-50 text-slate-500">
             <tr>
               <th className="text-left px-4 py-2 font-medium">氏名</th>
-              <th className="text-left px-4 py-2 font-medium hidden sm:table-cell">メール</th>
-              <th className="text-left px-4 py-2 font-medium">権限</th>
+              <th className="text-left px-4 py-2 font-medium">雇用形態</th>
+              <th className="text-left px-4 py-2 font-medium hidden sm:table-cell">役職名</th>
               <th className="text-left px-4 py-2 font-medium hidden md:table-cell">資格</th>
               <th className="text-left px-4 py-2 font-medium">状態</th>
               <th className="px-4 py-2"></th>
@@ -284,14 +262,9 @@ export default function StaffPage() {
               staffList.map((s) => (
                 <tr key={s.id} className="border-t border-slate-100">
                   <td className="px-4 py-2">{s.full_name}</td>
+                  <td className="px-4 py-2 text-slate-500">{s.employment_type ?? "—"}</td>
                   <td className="px-4 py-2 hidden sm:table-cell text-slate-500">
-                    {s.email}
-                    {!s.user_id && (
-                      <span className="ml-2 text-xs text-amber-600">未サインアップ</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    {s.role === "admin" ? "管理者" : "職員"}
+                    {s.position ?? "—"}
                   </td>
                   <td className="px-4 py-2 hidden md:table-cell text-slate-500">
                     {qualifications

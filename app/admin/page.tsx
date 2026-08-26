@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Staff, ShiftType, StaffingRule, Shift, ShiftRequest } from "@/lib/types";
+import { weekdayIndexMonFirst } from "@/lib/constants";
 
 function pad(n: number) {
   return n.toString().padStart(2, "0");
@@ -13,7 +14,7 @@ function toDateStr(y: number, m: number, d: number) {
 function daysInMonth(y: number, m: number) {
   return new Date(y, m + 1, 0).getDate();
 }
-const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
+const WEEKDAY_JA_SUN_FIRST = ["日", "月", "火", "水", "木", "金", "土"];
 
 export default function AdminCalendarPage() {
   const supabase = createClient();
@@ -21,7 +22,7 @@ export default function AdminCalendarPage() {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth()); // 0-indexed
 
-  const [staffList, setStaffList] = useState<(Staff & { qualificationIds: string[] })[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
   const [shiftTypes, setShiftTypes] = useState<ShiftType[]>([]);
   const [rules, setRules] = useState<StaffingRule[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -42,14 +43,12 @@ export default function AdminCalendarPage() {
 
     const [
       { data: staffRows },
-      { data: linkRows },
       { data: st },
       { data: sr },
       { data: sh },
       { data: req },
     ] = await Promise.all([
       supabase.from("staff").select("*").eq("active", true).order("created_at"),
-      supabase.from("staff_qualifications").select("*"),
       supabase.from("shift_types").select("*").order("sort_order"),
       supabase.from("staffing_rules").select("*"),
       supabase
@@ -64,14 +63,7 @@ export default function AdminCalendarPage() {
         .lte("work_date", monthEnd),
     ]);
 
-    setStaffList(
-      (staffRows ?? []).map((s) => ({
-        ...s,
-        qualificationIds: (linkRows ?? [])
-          .filter((l) => l.staff_id === s.id)
-          .map((l) => l.qualification_id),
-      }))
-    );
+    setStaffList(staffRows ?? []);
     setShiftTypes(st ?? []);
     setRules(sr ?? []);
     setShifts(sh ?? []);
@@ -89,33 +81,27 @@ export default function AdminCalendarPage() {
     return m;
   }, [shifts]);
 
-  const requestMap = useMemo(() => {
+  const requestsByDate = useMemo(() => {
     const m = new Map<string, ShiftRequest[]>();
     requests.forEach((r) => {
-      const key = `${r.staff_id}_${r.work_date}`;
-      m.set(key, [...(m.get(key) ?? []), r]);
+      m.set(r.work_date, [...(m.get(r.work_date) ?? []), r]);
     });
     return m;
   }, [requests]);
 
-  // 日付 x 勤務パターン ごとの割当人数・資格者人数を集計
+  function ruleValue(weekday: number, shiftTypeId: string) {
+    return rules.find((r) => r.weekday === weekday && r.shift_type_id === shiftTypeId)?.min_count ?? 0;
+  }
+
+  // 日付 x 勤務パターン ごとの割当人数を集計（カレンダー下部の割り当て表用）
   const dailyCounts = useMemo(() => {
-    const counts = new Map<string, { total: number; qualified: number }>();
+    const counts = new Map<string, number>();
     shifts.forEach((s) => {
       const key = `${s.work_date}_${s.shift_type_id}`;
-      const staffMember = staffList.find((st) => st.id === s.staff_id);
-      const rule = rules.find((r) => r.shift_type_id === s.shift_type_id);
-      const isQualified =
-        !!rule?.required_qualification_id &&
-        !!staffMember?.qualificationIds.includes(rule.required_qualification_id);
-      const prev = counts.get(key) ?? { total: 0, qualified: 0 };
-      counts.set(key, {
-        total: prev.total + 1,
-        qualified: prev.qualified + (isQualified ? 1 : 0),
-      });
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     });
     return counts;
-  }, [shifts, staffList, rules]);
+  }, [shifts]);
 
   async function assignShift(staffId: string, date: string, shiftTypeId: string) {
     const key = `${staffId}_${date}`;
@@ -140,13 +126,15 @@ export default function AdminCalendarPage() {
     setMonth(d.getMonth());
   }
 
+  const totalStaff = staffList.length;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-slate-800">シフトカレンダー</h1>
           <p className="text-sm text-slate-500 mt-1">
-            セルをクリックして勤務パターンを選択してください。基準を下回ると赤字で警告します。
+            人員配置基準の最低人数が自動で入り、希望一覧の休み希望と照らし合わせて過不足を確認できます。
           </p>
         </div>
         <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg px-2 py-1">
@@ -162,136 +150,198 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      {/* 凡例 */}
-      <div className="flex flex-wrap gap-3 text-xs text-slate-500">
-        {shiftTypes.map((st) => (
-          <span key={st.id} className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: st.color }} />
-            {st.name}
-          </span>
-        ))}
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full inline-block bg-red-200" /> 休み希望
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full inline-block bg-emerald-200" /> 勤務希望
-        </span>
-      </div>
-
       {loading ? (
         <p className="text-slate-400 text-sm">読み込み中...</p>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
-          <table className="text-xs border-collapse min-w-max">
-            <thead>
-              <tr>
-                <th className="sticky left-0 bg-white z-10 px-3 py-2 text-left border-b border-slate-200 min-w-[120px]">
-                  職員
-                </th>
-                {dates.map((d) => {
-                  const day = Number(d.split("-")[2]);
-                  const wd = new Date(d).getDay();
-                  return (
-                    <th
-                      key={d}
-                      className={`px-1 py-2 text-center border-b border-slate-200 min-w-[52px] font-normal ${
-                        wd === 0 ? "text-red-500" : wd === 6 ? "text-blue-500" : "text-slate-500"
+        <>
+          {/* 曜日別の必要人数 × 休み希望の突き合わせ */}
+          <div className="bg-white border border-slate-200 rounded-2xl divide-y divide-slate-100">
+            <div className="px-4 py-2 text-xs font-medium text-slate-400 flex gap-4">
+              <span className="w-16">日付</span>
+              <span className="flex-1">最低必要人数</span>
+              <span className="flex-[1.6]">休み希望</span>
+              <span className="w-32 text-right">状況</span>
+            </div>
+            {dates.map((d) => {
+              const day = Number(d.split("-")[2]);
+              const jsWd = new Date(d + "T00:00:00").getDay();
+              const weekday = weekdayIndexMonFirst(d);
+              const requiredTotal = shiftTypes.reduce(
+                (sum, st) => sum + ruleValue(weekday, st.id),
+                0
+              );
+              const dayReqs = requestsByDate.get(d) ?? [];
+              const offCount = dayReqs.reduce((sum, r) => sum + (r.type === "半休" ? 0.5 : 1), 0);
+              const available = totalStaff - offCount;
+              const shortage = requiredTotal - available;
+              const isWarn = shortage > 0;
+              const slack = Math.max(0, available - requiredTotal);
+              const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+              return (
+                <div key={d} className="px-4 py-2.5 flex items-center gap-4 text-sm">
+                  <span className="w-16">
+                    <span
+                      className={`font-semibold ${
+                        jsWd === 0 ? "text-red-500" : jsWd === 6 ? "text-blue-500" : "text-slate-700"
                       }`}
                     >
                       {day}
-                      <div className="text-[10px]">{WEEKDAY_JA[wd]}</div>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {/* 配置基準チェック行 */}
-              {shiftTypes.map((st) => {
-                const rule = rules.find((r) => r.shift_type_id === st.id);
-                if (!rule) return null;
-                return (
-                  <tr key={`rule-${st.id}`} className="bg-slate-50">
-                    <td className="sticky left-0 bg-slate-50 z-10 px-3 py-1.5 text-slate-500 border-b border-slate-200">
-                      基準: {st.name}
-                    </td>
-                    {dates.map((d) => {
-                      const c = dailyCounts.get(`${d}_${st.id}`) ?? { total: 0, qualified: 0 };
-                      const shortStaff = c.total < rule.min_staff_count;
-                      const shortQualified =
-                        rule.min_qualified_count > 0 && c.qualified < rule.min_qualified_count;
-                      const isShort = shortStaff || shortQualified;
-                      return (
-                        <td
-                          key={d}
-                          className={`px-1 py-1.5 text-center border-b border-slate-200 ${
-                            isShort ? "text-red-600 font-semibold bg-red-50" : "text-slate-400"
-                          }`}
-                          title={
-                            isShort
-                              ? `必要人数 ${rule.min_staff_count}人${
-                                  rule.min_qualified_count > 0
-                                    ? ` / 有資格 ${rule.min_qualified_count}人`
-                                    : ""
-                                } に対し 実際 ${c.total}人${
-                                  rule.min_qualified_count > 0 ? ` (有資格${c.qualified}人)` : ""
-                                }`
-                              : undefined
-                          }
+                    </span>
+                    <span className="text-xs text-slate-400 ml-1">{WEEKDAY_JA_SUN_FIRST[jsWd]}</span>
+                  </span>
+                  <span className="flex-1 flex flex-wrap gap-1">
+                    {shiftTypes.map((st) => (
+                      <span
+                        key={st.id}
+                        className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 inline-flex items-center gap-1"
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full inline-block"
+                          style={{ backgroundColor: st.color }}
+                        />
+                        {st.name}
+                        {ruleValue(weekday, st.id)}
+                      </span>
+                    ))}
+                  </span>
+                  <span className="flex-[1.6] flex flex-wrap gap-1">
+                    {dayReqs.length === 0 ? (
+                      <span className="text-xs text-slate-300">休み希望なし</span>
+                    ) : (
+                      dayReqs.map((r) => (
+                        <span
+                          key={r.id}
+                          className="text-xs bg-white border border-slate-200 rounded-full px-2 py-0.5"
                         >
-                          {c.total}/{rule.min_staff_count}
-                        </td>
+                          {staffList.find((s) => s.id === r.staff_id)?.full_name ?? "?"}
+                          <span className="text-slate-400 ml-1">{r.type === "半休" ? "半休" : "休み"}</span>
+                        </span>
+                      ))
+                    )}
+                  </span>
+                  <span className="w-32 text-right">
+                    {isWarn ? (
+                      <span className="inline-flex flex-col items-end bg-red-50 text-red-600 rounded-lg px-2.5 py-1">
+                        <span className="text-xs font-bold">⚠ 人員不足</span>
+                        <span className="text-[10px]">最低{requiredTotal}名に対し{fmt(shortage)}名不足</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex flex-col items-end bg-emerald-50 text-emerald-700 rounded-lg px-2.5 py-1">
+                        <span className="text-xs font-bold">余裕あり</span>
+                        <span className="text-[10px]">あと{fmt(slack)}名まで休み可</span>
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 実際の割り当て（微調整用） */}
+          <div>
+            <h2 className="text-base font-bold text-slate-800 mb-1">職員ごとの割り当て</h2>
+            <p className="text-xs text-slate-500 mb-3">
+              セルをクリックして勤務パターンを割り当てます。実際の人数はここで微調整できます。
+            </p>
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+              <table className="text-xs border-collapse min-w-max">
+                <thead>
+                  <tr>
+                    <th className="sticky left-0 bg-white z-10 px-3 py-2 text-left border-b border-slate-200 min-w-[120px]">
+                      職員
+                    </th>
+                    {dates.map((d) => {
+                      const day = Number(d.split("-")[2]);
+                      const wd = new Date(d + "T00:00:00").getDay();
+                      return (
+                        <th
+                          key={d}
+                          className={`px-1 py-2 text-center border-b border-slate-200 min-w-[52px] font-normal ${
+                            wd === 0 ? "text-red-500" : wd === 6 ? "text-blue-500" : "text-slate-500"
+                          }`}
+                        >
+                          {day}
+                          <div className="text-[10px]">{WEEKDAY_JA_SUN_FIRST[wd]}</div>
+                        </th>
                       );
                     })}
                   </tr>
-                );
-              })}
-
-              {staffList.map((s) => (
-                <tr key={s.id} className="hover:bg-slate-50/60">
-                  <td className="sticky left-0 bg-white z-10 px-3 py-1.5 border-b border-slate-100 font-medium text-slate-700 whitespace-nowrap">
-                    {s.full_name}
-                  </td>
-                  {dates.map((d) => {
-                    const key = `${s.id}_${d}`;
-                    const shift = shiftMap.get(key);
-                    const reqs = requestMap.get(key) ?? [];
-                    const hasDayOff = reqs.some((r) => r.request_type === "day_off");
-                    const hasWant = reqs.some((r) => r.request_type === "want_shift");
-                    const bg = hasDayOff ? "bg-red-50" : hasWant ? "bg-emerald-50" : "";
-                    return (
-                      <td key={d} className={`border-b border-slate-100 p-0.5 ${bg}`}>
-                        <select
-                          value={shift?.shift_type_id ?? ""}
-                          disabled={savingKey === key}
-                          onChange={(e) => assignShift(s.id, d, e.target.value)}
-                          title={reqs.map((r) => r.note).filter(Boolean).join(" / ")}
-                          className="w-full text-[11px] rounded border-0 bg-transparent py-1 focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
-                          style={
-                            shift
-                              ? {
-                                  backgroundColor:
-                                    shiftTypes.find((t) => t.id === shift.shift_type_id)?.color +
-                                    "33",
-                                }
-                              : undefined
-                          }
-                        >
-                          <option value="">-</option>
-                          {shiftTypes.map((st) => (
-                            <option key={st.id} value={st.id}>
-                              {st.name}
-                            </option>
-                          ))}
-                        </select>
+                </thead>
+                <tbody>
+                  {/* 配置基準チェック行（勤務パターンごとの実際の割当人数 / 基準） */}
+                  {shiftTypes.map((st) => (
+                    <tr key={`rule-${st.id}`} className="bg-slate-50">
+                      <td className="sticky left-0 bg-slate-50 z-10 px-3 py-1.5 text-slate-500 border-b border-slate-200">
+                        基準: {st.name}
                       </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      {dates.map((d) => {
+                        const weekday = weekdayIndexMonFirst(d);
+                        const need = ruleValue(weekday, st.id);
+                        const actual = dailyCounts.get(`${d}_${st.id}`) ?? 0;
+                        const isShort = actual < need;
+                        return (
+                          <td
+                            key={d}
+                            className={`px-1 py-1.5 text-center border-b border-slate-200 ${
+                              isShort ? "text-red-600 font-semibold bg-red-50" : "text-slate-400"
+                            }`}
+                          >
+                            {actual}/{need}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+
+                  {staffList.map((s) => (
+                    <tr key={s.id} className="hover:bg-slate-50/60">
+                      <td className="sticky left-0 bg-white z-10 px-3 py-1.5 border-b border-slate-100 font-medium text-slate-700 whitespace-nowrap">
+                        {s.full_name}
+                      </td>
+                      {dates.map((d) => {
+                        const key = `${s.id}_${d}`;
+                        const shift = shiftMap.get(key);
+                        const hasOffRequest = (requestsByDate.get(d) ?? []).some(
+                          (r) => r.staff_id === s.id
+                        );
+                        return (
+                          <td
+                            key={d}
+                            className={`border-b border-slate-100 p-0.5 ${hasOffRequest ? "bg-red-50" : ""}`}
+                          >
+                            <select
+                              value={shift?.shift_type_id ?? ""}
+                              disabled={savingKey === key}
+                              onChange={(e) => assignShift(s.id, d, e.target.value)}
+                              className="w-full text-[11px] rounded border-0 bg-transparent py-1 focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                              style={
+                                shift
+                                  ? {
+                                      backgroundColor:
+                                        shiftTypes.find((t) => t.id === shift.shift_type_id)?.color +
+                                        "33",
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <option value="">-</option>
+                              {shiftTypes.map((st) => (
+                                <option key={st.id} value={st.id}>
+                                  {st.name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
       {staffList.length === 0 && !loading && (

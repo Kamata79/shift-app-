@@ -14,13 +14,13 @@ export default async function AdminLayout({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: staff } = await supabase
-    .from("staff")
-    .select("role, full_name")
-    .eq("user_id", user.id)
+  const { data: admin } = await supabase
+    .from("admin_users")
+    .select("full_name")
+    .eq("id", user.id)
     .maybeSingle();
 
-  if (!staff || staff.role !== "admin") redirect("/staff");
+  if (!admin) redirect("/staff");
 
   const nav = [
     { href: "/admin", label: "シフトカレンダー" },
@@ -49,7 +49,7 @@ export default async function AdminLayout({
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-500 hidden sm:inline">
-              {staff.full_name} さん
+              {admin.full_name} さん
             </span>
             <SignOutButton />
           </div>

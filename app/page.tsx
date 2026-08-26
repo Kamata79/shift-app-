@@ -9,13 +9,11 @@ export default async function Home() {
 
   if (!user) redirect("/login");
 
-  const { data: staff } = await supabase
-    .from("staff")
-    .select("role")
-    .eq("user_id", user.id)
+  const { data: admin } = await supabase
+    .from("admin_users")
+    .select("id")
+    .eq("id", user.id)
     .maybeSingle();
 
-  if (staff?.role === "admin") redirect("/admin");
-  if (staff) redirect("/staff");
-  redirect("/login");
+  redirect(admin ? "/admin" : "/staff");
 }

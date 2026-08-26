@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Shift, ShiftType } from "@/lib/types";
+import { useStaffIdentity } from "@/lib/staffIdentity";
 
 function pad(n: number) {
   return n.toString().padStart(2, "0");
@@ -17,6 +18,7 @@ const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 export default function StaffHomePage() {
   const supabase = createClient();
+  const { staffId, staffName } = useStaffIdentity();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -35,23 +37,11 @@ export default function StaffHomePage() {
     const monthStart = toDateStr(year, month, 1);
     const monthEnd = toDateStr(year, month, numDays);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: staff } = await supabase
-      .from("staff")
-      .select("id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (!staff) return;
-
     const [{ data: sh }, { data: st }] = await Promise.all([
       supabase
         .from("shifts")
         .select("*")
-        .eq("staff_id", staff.id)
+        .eq("staff_id", staffId)
         .gte("work_date", monthStart)
         .lte("work_date", monthEnd),
       supabase.from("shift_types").select("*").order("sort_order"),
@@ -59,7 +49,7 @@ export default function StaffHomePage() {
     setShifts(sh ?? []);
     setShiftTypes(st ?? []);
     setLoading(false);
-  }, [supabase, year, month, numDays]);
+  }, [supabase, year, month, numDays, staffId]);
 
   useEffect(() => {
     load();
@@ -80,7 +70,7 @@ export default function StaffHomePage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-bold text-slate-800">今月のシフト</h1>
+        <h1 className="font-bold text-slate-800">{staffName} さんの今月のシフト</h1>
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1">
           <button onClick={() => changeMonth(-1)} className="px-2 text-slate-500">
             ←

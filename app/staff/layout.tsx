@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import SignOutButton from "@/app/components/SignOutButton";
+import StaffIdentityGate from "@/app/staff/StaffIdentityGate";
 
 export default async function StaffLayout({
   children,
@@ -14,14 +15,12 @@ export default async function StaffLayout({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: staff } = await supabase
-    .from("staff")
-    .select("role, full_name")
-    .eq("user_id", user.id)
+  const { data: admin } = await supabase
+    .from("admin_users")
+    .select("id")
+    .eq("id", user.id)
     .maybeSingle();
-
-  if (!staff) redirect("/login");
-  if (staff.role === "admin") redirect("/admin");
+  if (admin) redirect("/admin");
 
   const nav = [
     { href: "/staff", label: "シフト確認" },
@@ -32,9 +31,7 @@ export default async function StaffLayout({
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
-          <span className="font-bold text-slate-800 text-sm">
-            {staff.full_name} さんのシフト
-          </span>
+          <span className="font-bold text-slate-800 text-sm">シフト管理</span>
           <SignOutButton />
         </div>
         <nav className="max-w-lg mx-auto flex gap-4 px-4 pb-3">
@@ -49,7 +46,9 @@ export default async function StaffLayout({
           ))}
         </nav>
       </header>
-      <main className="max-w-lg mx-auto px-4 py-5">{children}</main>
+      <main className="max-w-lg mx-auto px-4 py-5">
+        <StaffIdentityGate>{children}</StaffIdentityGate>
+      </main>
     </div>
   );
 }

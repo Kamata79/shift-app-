@@ -1,13 +1,13 @@
-export type Role = "admin" | "staff";
+export interface AdminUser {
+  id: string;
+  full_name: string;
+}
 
 export interface Staff {
   id: string;
-  user_id: string | null;
-  email: string;
   full_name: string;
-  role: Role;
   employment_type: string | null;
-  desired_work_days_per_week: number | null;
+  position: string | null;
   active: boolean;
   created_at: string;
 }
@@ -28,11 +28,9 @@ export interface ShiftType {
 }
 
 export interface StaffingRule {
-  id: string;
+  weekday: number; // 0=月 ... 6=日
   shift_type_id: string;
-  min_staff_count: number;
-  required_qualification_id: string | null;
-  min_qualified_count: number;
+  min_count: number;
 }
 
 export interface Shift {
@@ -43,13 +41,12 @@ export interface Shift {
   note: string | null;
 }
 
-export type RequestType = "day_off" | "want_shift";
+export type RequestType = "休み希望" | "半休";
 
 export interface ShiftRequest {
   id: string;
   staff_id: string;
   work_date: string;
-  request_type: RequestType;
-  shift_type_id: string | null;
+  type: RequestType;
   note: string | null;
 }
